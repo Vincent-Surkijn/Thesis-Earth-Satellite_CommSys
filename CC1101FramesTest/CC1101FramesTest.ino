@@ -1,9 +1,16 @@
 #include <ELECHOUSE_CC1101_SRC_DRV.h>
 
+/******** TODO ************/
+/*
+ * Status frames
+ * Sequence number incrementing
+ * 
+ */
+
 //Global variables
 byte authToken[8] = {0,0,0,0,0,0,0,0};
 byte seqNr = 0;
-char res[64];
+char TxBuff[64];
 
 void setup() {
 
@@ -28,20 +35,8 @@ void setup() {
 }
 
 void loop() {
-  //Serial.print("number:");
-  //Serial.println(seqNr);
-  buildControlFrame("Hello World!");
 
-  Serial.print("Res:");
-  Serial.print(byte(res[0]));
-  Serial.print("|");
-  
-  for(int i = 0; i< 8; i++)  Serial.print(byte(res[i+1]));//
-  Serial.print("|");
-  
-  Serial.print(strlen(res));
-  //for(int i = 0; i< strlen(res)-(8+1); i++)  Serial.print(res[i+8+1]);  // when receiving length will be returned by rx function
-  Serial.println("|");
+  buildStatusFrame("Hello World!");
   
   delay(3000);
 }
@@ -51,7 +46,7 @@ void loop() {
 char *buildControlFrame(char *msg){
   // Assign sequence number
   if(sizeof(seqNr)==1){
-    res[0] = seqNr;
+    TxBuff[0] = seqNr;
   }
   else{
     Serial.println("Error: sequence number is larger than one byte");
@@ -59,7 +54,7 @@ char *buildControlFrame(char *msg){
   }
   // Assign authentication token
   if(sizeof(authToken)==8){
-    for(int i = 0; i< sizeof(authToken); i++)  res[i+1]=authToken[i];
+    for(int i = 0; i< sizeof(authToken); i++)  TxBuff[i+1]=authToken[i];
   }
   else{
     Serial.println("Error: authentication token is larger than 8 bytes");  
@@ -67,7 +62,7 @@ char *buildControlFrame(char *msg){
   }
   // Assign message
   if(sizeof(msg)<255){
-    for(int i = 0; i< strlen(msg); i++)  res[i+8+1]=msg[i];
+    for(int i = 0; i< strlen(msg); i++)  TxBuff[i+8+1]=msg[i];
   }
   else{
     Serial.println("Error: message is larger than 255 bytes");  
@@ -75,24 +70,44 @@ char *buildControlFrame(char *msg){
   }
 /*
   // Error check
-  Serial.print("Res:");
-  Serial.print(byte(res[0]));
+  Serial.print("TxBuff:");
+  Serial.print(byte(TxBuff[0]));
   Serial.print("|");
   
-  for(int i = 0; i< sizeof(authToken); i++)  Serial.print(byte(res[i+1]));//
+  for(int i = 0; i< sizeof(authToken); i++)  Serial.print(byte(TxBuff[i+1]));//
   Serial.print("|");
   
   //Serial.print("Size of msg:");
   //Serial.println(sizeof(msg));
-  for(int i = 0; i< strlen(msg); i++)  Serial.print(res[i+8+1]);
+  for(int i = 0; i< strlen(msg); i++)  Serial.print(TxBuff[i+8+1]);
   Serial.println("|");
  */
-  return res;
 }
 
 // Status frame: |preamble|sync|length|Seq Nr|Payload|CRC|
 char* buildStatusFrame(char* msg){
-  char *res = msg;
-    
-  return res;
+// Assign sequence number
+  if(sizeof(seqNr)==1){
+    TxBuff[0] = seqNr;
+  }
+  else{
+    Serial.println("Error: sequence number is larger than one byte");
+    return -1; 
+  }
+  // Assign message
+  if(sizeof(msg)<255){
+    for(int i = 0; i< strlen(msg); i++)  TxBuff[i+1]=msg[i];
+  }
+  else{
+    Serial.println("Error: message is larger than 255 bytes");  
+    return -1; 
+  }
+/*
+  // Error check
+  Serial.print("TxBuff:");
+  Serial.print(byte(TxBuff[0]));
+  Serial.print("|");
+  
+  for(int i = 0; i< strlen(msg); i++)  Serial.print(TxBuff[i+1]);
+  Serial.println("|");*/
 }
