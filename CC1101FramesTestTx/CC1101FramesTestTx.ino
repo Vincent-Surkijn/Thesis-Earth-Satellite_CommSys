@@ -62,13 +62,13 @@ void setup() {
     ,  2  // Priority, with 3 (configMAX_PRIORITIES - 1) being the highest, and 0 being the lowest.
     ,  &xHandleTransmit );
 
-    xTaskCreate(
+    /*xTaskCreate(
     TaskReceive
     ,  "Receive"   // A name just for humans
     ,  128  // This stack size can be checked & adjusted by reading the Stack Highwater
     ,  NULL
-    ,  3  // Priority, with 3 (configMAX_PRIORITIES - 1) being the highest, and 0 being the lowest.
-    ,  &xHandleReceive );
+    ,  2  // Priority, with 3 (configMAX_PRIORITIES - 1) being the highest, and 0 being the lowest.
+    ,  &xHandleReceive );*/
 
   Serial.println("Setup done");
 }
@@ -104,7 +104,7 @@ void TaskTransmit(void *pvParameters)  // This is a task.
     }
     Serial.println("Message sent");
 
-    // wait for 2 seconds
+    // wait for 4 seconds
     vTaskDelay(4000 / portTICK_PERIOD_MS );
   }
 }
@@ -117,6 +117,7 @@ void TaskReceive(void *pvParameters)  // This is a task.
   
   for(;;){  // Infinite loop
     Serial.println("RxTask");
+
     // While nothing is received, check every 100 ticks (100*15ms=1500ms=1.5s)
     while(!ELECHOUSE_cc1101.CheckRxFifo(100)){
       vTaskDelay(100);
@@ -132,26 +133,7 @@ void TaskReceive(void *pvParameters)  // This is a task.
         
         short len = ELECHOUSE_cc1101.ReceiveData(Rxbuff);
         Rxbuff[len] = '\0';
-        /*for(int i = 0; i < len; i++){
-          Serial.print(Rxbuff[i]);
-          Serial.print('|');
-        }*/
-        Serial.println("--END----------");
-        Serial.print("Message:");
         Serial.println((char *) Rxbuff);
-        byte l;
-        if(seqNr<10)  l = 1;
-        else if (seqNr<100) l = 2;
-        else  l = 3;
-        Serial.print("Rxbuff:");
-        for(int i = 1; i <= l; i++)  Serial.print(Rxbuff[i-1]);
-        Serial.print("|");
-
-        for(int i = 1; i<= strlen(authToken); i++)  Serial.print(Rxbuff[i+l-1]);//
-        Serial.print("|");
-        
-        for(int i = 1; i<= strlen(Rxbuff)-strlen(authToken)-l; i++)  Serial.print(Rxbuff[i+l+strlen(authToken)-1]);
-        Serial.println("|");
         Serial.println("----END---");
         
         // Increment sequence number, loop back to 0 if 255
@@ -161,8 +143,8 @@ void TaskReceive(void *pvParameters)  // This is a task.
         else{
           seqNr = 0;
         }
-        //Serial.print("seqNr:");
-        //Serial.println(seqNr);
+        Serial.print("seqNr:");
+        Serial.println(seqNr);
       }
       else{
         Serial.print("CRC check failed on msg ");
