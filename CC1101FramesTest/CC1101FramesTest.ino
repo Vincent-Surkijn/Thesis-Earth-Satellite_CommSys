@@ -12,10 +12,11 @@
 
 //Global variables
 char *authToken = "00000000";
-short seqNr = 100;
+short seqNr = 0;
 char TxBuffCtrl[64];
 char TxBuffStatus[255];
 char Rxbuff[255];
+bool bleep = true;
 
 // define FreeRTOS tasks
 void TaskTransmit( void *pvParameters );
@@ -91,17 +92,20 @@ void TaskTransmit(void *pvParameters)  // This is a task.
     Serial.println("TxTask");
 
     // Build frame
-    buildControlFrame("Hello");
+    buildStatusFrame("Battery:50%");
     // Send data
     ELECHOUSE_cc1101.SendData(TxBuffCtrl,255);
     
-    // Increment sequence number, loop back to 0 if 255
-    if(seqNr<255){
-      seqNr++;
+    // Increment sequence number if not a bleep, loop back to 0 if 255
+    if(!bleep){
+      if(seqNr<255){
+        seqNr++;
+      }
+      else{
+        seqNr = 0;
+      }
     }
-    else{
-      seqNr = 0;
-    }
+    
     Serial.println("Message sent");
 
     // wait for 2 seconds
@@ -125,17 +129,12 @@ void TaskReceive(void *pvParameters)  // This is a task.
     //When something is received we give some time (argument for function) to receive the message in full.(time in millis)
     if (ELECHOUSE_cc1101.CheckRxFifo(100)){
       if (ELECHOUSE_cc1101.CheckCRC()){    //CRC Check. If "setCrc(false)" crc returns always OK!
-        Serial.print("Rssi: ");
-        Serial.println(ELECHOUSE_cc1101.getRssi());
-        Serial.print("LQI: ");
-        Serial.println(ELECHOUSE_cc1101.getLqi());
-        
+        // Stop transmitting bleeps
+        vTaskSuspend(xHandleTransmit);
+        bleep = false;
+
         short len = ELECHOUSE_cc1101.ReceiveData(Rxbuff);
         Rxbuff[len] = '\0';
-        /*for(int i = 0; i < len; i++){
-          Serial.print(Rxbuff[i]);
-          Serial.print('|');
-        }*/
         Serial.println("--END----------");
         Serial.print("Message:");
         Serial.println((char *) Rxbuff);
@@ -143,16 +142,24 @@ void TaskReceive(void *pvParameters)  // This is a task.
         if(seqNr<10)  l = 1;
         else if (seqNr<100) l = 2;
         else  l = 3;
-        Serial.print("Rxbuff:");
-        for(int i = 1; i <= l; i++)  Serial.print(Rxbuff[i-1]);
-        Serial.print("|");
+        char temp[l+1];
+        //Serial.print("Rxbuff:");
+        for(int i = 1; i <= l; i++){
+          //Serial.print(Rxbuff[i-1]);
+          temp[i-1] = Rxbuff[i-1];
+        }
+        temp[l] = '\0';
+        int receivedSeqNr = atoi(temp);
+        Serial.println(receivedSeqNr);
+        if(seqNr != receivedSeqNr)  Serial.println("Error: unexpected seq nr");
+        //Serial.print("|");
 
         for(int i = 1; i<= strlen(authToken); i++)  Serial.print(Rxbuff[i+l-1]);//
-        Serial.print("|");
+        //Serial.print("|");
         
         for(int i = 1; i<= strlen(Rxbuff)-strlen(authToken)-l; i++)  Serial.print(Rxbuff[i+l+strlen(authToken)-1]);
-        Serial.println("|");
-        Serial.println("----END---");
+        //Serial.println("|");
+        //Serial.println("----END---");
         
         // Increment sequence number, loop back to 0 if 255
         if(seqNr<255){
