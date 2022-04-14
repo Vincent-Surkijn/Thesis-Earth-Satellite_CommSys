@@ -2,13 +2,22 @@
 
 #define SYNC_WORD B11000000
 
+/*
+ * TODO
+ * Next part of data flow: exchange
+ * Know when Status and when Control frame
+ */
+
 //Global variables
-char *authToken = "00000000";
 short seqNr = 0;
-char Rxbuff[255];
+char *authToken = "abcdefgh";
+char Rxbuff[64];
+char Txbuff[64];
+String usr = "admin";
+String pswd = "password";
 bool conn = false;
+bool encrypted = true;
 unsigned long t1;
-unsigned long t2;
 
 void setup() {
   Serial.begin(9600);
@@ -32,33 +41,37 @@ void setup() {
   Serial.println("FinalFramesCubeSat_CC1101");
 
   t1 = millis();
-  t2 = millis();
 }
 
 void loop() {
-  // When a connection is made, the bleeps stop
-  /*if(!conn && millis()-t1>=4000){
+  
+  // Send a bleep every 4s, unless a connection is made
+  if(!conn && millis()-t1>=4000){
     sendBleep();
     // Update t value
     t1 = millis();
-  }*/
-
-  // Check Rx buffer every 50ms
-  if(millis()-t2>=50){
-    checkReceiver();
-    // Update t value
-    t2 = millis();
   }
+
+  // Check the RX buffer
+  checkReceiver();
 }
 
 
 /******** Functions *********/
-void checkReceiver(){
+/*
+ * This method checks the RX Fifo
+ * Returns -1 if the Fifo was empty
+ *         0 if a message was received and decoded correctly
+ *         1 if a retransmit should be requested
+ *         2 if the token/usr/pswd was invalid
+ */
+int checkReceiver(){
   //Serial.println("Checking receiver");
   if (ELECHOUSE_cc1101.CheckRxFifo(100)){
       if (ELECHOUSE_cc1101.CheckCRC()){    //CRC Check. If "setCrc(false)" crc returns always OK!
-        // Stop transmitting bleeps
-        conn = true;
+        
+        if(encrypted) Serial.println("Received encrypted message");
+        else Serial.println("Received unencrypted message");
 
         //Receive and store message
         short len = ELECHOUSE_cc1101.ReceiveData(Rxbuff);
@@ -79,19 +92,51 @@ void checkReceiver(){
         }
         temp[l] = '\0';
         int receivedSeqNr = atoi(temp);
-        Serial.print("Decoded nr:");
+        Serial.print("Sequence nr:");
         Serial.println(receivedSeqNr);
 
-        // Check values
+        // Check seq nr
         if(seqNr != receivedSeqNr)  Serial.println("Error: unexpected seq nr");
-        //Serial.print("|");
 
-        for(int i = 1; i<= strlen(authToken); i++)  Serial.print(Rxbuff[i+l-1]);//
-        //Serial.print("|");
+        // Check token if necessary
+        if(conn && encrypted){
+          if(!checkToken(l))  return 2;
+        }
+
+        // Read payload
+        Serial.print("Payload:");
+        char payload[255];
+        int i;
+        // contains token
+        if(conn && encrypted){
+          for(i = 1; i<= strlen(Rxbuff)-strlen(authToken)-l; i++){
+            payload[i-1] = Rxbuff[i+l+strlen(authToken)-1];
+            Serial.print(Rxbuff[i+l+strlen(authToken)-1]);
+          }  
+        }
+        // does not contain token
+        else{
+          for(i = 1; i<= strlen(Rxbuff)-l; i++){
+            payload[i-1] = Rxbuff[i+l-1];
+            Serial.print(Rxbuff[i+l-1]);     
+          } 
+        }
+        Serial.println();
         
-        for(int i = 1; i<= strlen(Rxbuff)-strlen(authToken)-l; i++)  Serial.print(Rxbuff[i+l+strlen(authToken)-1]);
-        //Serial.println("|");
-        //Serial.println("----END---");
+        // Pass payload to handler
+        payload[i-1] = '\0';
+        payloadHandler(payload);
+        
+        // Check authentication if first message
+        if(!conn){
+          // If not correct, return 2
+          if(!checkAuth(l))  return 2;
+          // Else send token and stop transmitting bleeps
+          else{
+            transmitToken();
+            conn = true;
+          }
+        }
         
         // Increment sequence number, loop back to 0 if 255
         if(seqNr<255){
@@ -100,34 +145,183 @@ void checkReceiver(){
         else{
           seqNr = 0;
         }
-        //Serial.print("seqNr:");
-        //Serial.println(seqNr);
+        
+        return 0;
       }
       else{
         Serial.print("CRC check failed on msg ");
         Serial.println(seqNr);
+        return 1;
       }
     }
+
+    return -1;
 }
 
+/*
+ * This method reads the message payload and acts upon it
+ * Parameter char *payload: contains the payload of the received message
+ * Returns true if successful, false if not
+ */
+bool payloadHandler(char *payload){
+  Serial.print("Passed payload:");
+  Serial.println(payload);
+  // Check payload
+  if(strcmp(payload,"adminpassword")==0)  return true;
+  if(strcmp(payload,"deploy panels")==0){
+    if(deploySolarPanels()){
+      // Transmit confirmation message
+      String temp = buildControlFrame("Panels deployed");
+      temp.toCharArray(Txbuff,64);
+      ELECHOUSE_cc1101.SendData(Txbuff,64);
+      Serial.print("Payload handler sent ");
+      Serial.println(Txbuff);
+      // Return true for success
+      return true;
+    }
+  }
+  if(strcmp(payload,"unencrypted mode")==0){
+    // Unencrypted messages can't enable unencrypted mode
+    if(!encrypted){
+      Serial.println("Error: unencrypted message tried to enable unencrypted mode");
+      return false;
+    }
+    else{
+      // Transmit success message
+      String temp = buildControlFrame("unencrypted mode enabled");
+      temp.toCharArray(Txbuff,64);
+      ELECHOUSE_cc1101.SendData(Txbuff,64);
+      Serial.print("Payload handler sent ");
+      Serial.println(Txbuff);
+  
+      // Disable encryption
+      encrypted = false;
+      
+      // Return true for success
+      return true;
+    }
+  }
+  if(strcmp(payload,"battery level")==0){
+    // Transmit battery level
+      String temp = buildStatusFrame("50%");
+      temp.toCharArray(Txbuff,64);
+      ELECHOUSE_cc1101.SendData(Txbuff,64);
+      Serial.print("Payload handler sent ");
+      Serial.println(Txbuff);
+      
+      // Return true for success
+      return true;
+  }
+  
+  Serial.println("Error: unrecognised payload");
+  return false;
+}
+
+/*
+ * This method mimics the deploying of the solar panels
+ * Returns true if successful, false if not
+ */
+bool deploySolarPanels(){
+  if(!encrypted){
+    Serial.println("Error: unencrypted message tried to deploy solar panels!");
+    return false;
+  }
+  else{
+    Serial.println("Deployed solar panels");
+    return true;
+  }
+}
+
+/*
+ * This method transmits the authentication token in a Control frame
+ */
+void transmitToken(){
+  // Build frame
+  String msg = buildControlFrame(authToken);
+  msg.toCharArray(Txbuff,64);
+  // Send data
+  ELECHOUSE_cc1101.SendData(Txbuff,64);
+  Serial.print("Sent token:");
+  Serial.println(Txbuff);
+}
+
+/*
+ * This method checks the authentication frame
+ * Parameter byte l: contains length of expected sequence number
+ * Returns true if correct usr&pswd, false if incorrect
+ */
+bool checkAuth(byte l){
+    Serial.print("Auth:");
+    char auth[strlen(Rxbuff)-l];
+    for(int i = 1; i<= strlen(Rxbuff)-l; i++){
+      auth[i-1] = Rxbuff[i+l-1];
+      Serial.print(Rxbuff[i+l-1]);
+    }
+    auth[strlen(Rxbuff)-l]='\0';
+    Serial.println();
+    usr.concat(pswd);
+    char temp[50];
+    usr.toCharArray(temp,50);
+    //Serial.println(temp);
+    if(strcmp(auth,temp)!=0){
+      Serial.println("Error: invalid authentication");
+      return false;
+    }
+
+    return true;
+}
+
+/*
+ * This method checks the authentication token of a frame
+ * Parameter byte l: contains length of expected sequence number
+ * Returns true if correct token, false if incorrect
+ */
+bool checkToken(byte l){
+    Serial.print("Token:");
+    char token[8];
+    for(int i = 1; i<= strlen(authToken); i++){
+      token[i-1] = Rxbuff[i+l-1];
+      Serial.print(Rxbuff[i+l-1]);
+    }
+    token[8] = '\0';
+    Serial.println();
+    if(strcmp(token,authToken)!=0){
+      Serial.println("Error: invalid token");
+      return false;
+    }
+
+    return true;
+}
+
+/*
+ * This method sends the bleep message
+ */
 void sendBleep(){
   // Build frame
   char bleep[300]; 
-  (buildStatusFrame("Battery:50%")).toCharArray(bleep,300);
+  // Set sequence number to -1 because it is incremented in buildStatusFrame()
+  seqNr = -1;
+  (buildStatusFrame("Status update")).toCharArray(bleep,300);
 
   // Send data
   ELECHOUSE_cc1101.SendData(bleep,255);
 
   // Error check
-  //Serial.print("Bleep: ");
-  //Serial.println(bleep);
-  Serial.println("Message sent");
+  Serial.print("Bleep:");
+  Serial.println(bleep);
+  Serial.println("Sent unencrypted bleep");
 }
 
 // Control frame: |preamble|sync|length|Seq Nr|Token|Payload|CRC|
 String buildControlFrame(char *msg){
   String temp;
   char TxBuffCtrl[64];
+
+  // Error check
+  if(!encrypted)  Serial.println("Error: unencrypted Control frame");
+  
+  // Increment seq Nr before building
+  seqNr++;
   
   // Assign sequence number
   temp = String(seqNr);
@@ -150,15 +344,24 @@ String buildStatusFrame(char* msg){
   String temp;
   char TxBuffStatus[255];
 
+  // Status frames should never be encrypted
+  encrypted = false;
+  
+  // Increment seq Nr before building
+  seqNr++;
+  
   // Assign sequence number
   temp = String(seqNr);
 
   // Assign message
   temp.concat(msg);
 
+  // Re-enable encryption after Status frame is built
+  encrypted = true;
+
   // Error check
-  Serial.print("temp:");
-  Serial.println(temp);
+  //Serial.print("temp:");
+  //Serial.println(temp);
 
   return temp;
 }
