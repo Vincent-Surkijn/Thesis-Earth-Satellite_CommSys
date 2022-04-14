@@ -13,10 +13,10 @@
  */
 
 //Global variables
-char *authToken = "00000000";
-short seqNr = 0;
+char *authToken = "abcdefgh";
+short seqNr = 8;
 char Rxbuff[255];
-String input;
+String input = "100000000Hello World";
 
 // define FreeRTOS tasks
 void TaskTransmit( void *pvParameters );
@@ -25,8 +25,6 @@ void TaskReadInput( void *pvParameters );
 
 TaskHandle_t xHandleTransmit;
 TaskHandle_t xHandleReceive;
-
-SemaphoreHandle_t  TxBuffMutex;
 
 void setup() {
 
@@ -49,15 +47,15 @@ void setup() {
   ELECHOUSE_cc1101.setSyncWord(SYNC_WORD, SYNC_WORD); // set sync word to 1100 0000 1100 0000
   
   // Now set up tasks
-  /*xTaskCreate(
+  xTaskCreate(
     TaskTransmit
     ,  "Transmit"   // A name just for humans
     ,  128  // This stack size can be checked & adjusted by reading the Stack Highwater
     ,  NULL
     ,  2  // Priority, with 3 (configMAX_PRIORITIES - 1) being the highest, and 0 being the lowest.
     ,  &xHandleTransmit );
-*/
-    xTaskCreate(
+
+/*    xTaskCreate(
     TaskReceive
     ,  "Receive"   // A name just for humans
     ,  128  // This stack size can be checked & adjusted by reading the Stack Highwater
@@ -71,11 +69,9 @@ void setup() {
     ,  128  // This stack size can be checked & adjusted by reading the Stack Highwater
     ,  NULL
     ,  3  // Priority, with 3 (configMAX_PRIORITIES - 1) being the highest, and 0 being the lowest.
-    ,  NULL );
+    ,  NULL );*/
 
   Serial.println("CC1101FramesTestTx");
-
-  vTaskStartScheduler();
 }
 
 void loop() {
@@ -92,25 +88,32 @@ void TaskTransmit(void *pvParameters)  // This is a task.
   // Init task variables
   (void) pvParameters;
   
-  //for(;;){  // Infinite loop
+  for(;;){  // Infinite loop
     Serial.println("TxTask");
 
-    // Build frame
-    char buff[50];
-    input.toCharArray(buff,50);
+    // Concatenate counter and message in String datatype (because it has .concat method)
+    String buff = String(seqNr);
+    buff.concat(authToken);
+    buff.concat("Hello world");
+    
+    // Convert to char array for SendData method
+    char c[50];
+    buff.toCharArray(c,50);
+    //Serial.print("c: ");
+    //Serial.println(c);
     // Send data
-    ELECHOUSE_cc1101.SendData(buff,255);
+    ELECHOUSE_cc1101.SendData(c,50);
+    seqNr++;
 
     Serial.println(buff);
     Serial.println("Message sent");
 
-    //xTaskCreate(TaskReceive,  "Receive",  128,  NULL,  2,  &xHandleReceive );
-    vTaskDelete(xHandleTransmit);
-  //}
+    vTaskDelay(150);
+  }
 }
 
 
-void TaskReceive(void *pvParameters)  // This is a task.
+/*void TaskReceive(void *pvParameters)  // This is a task.
 {
   // Init task variables
   (void) pvParameters;
@@ -139,7 +142,7 @@ ELECHOUSE_cc1101.SendData("Hello there",255);
       }
     }
   } 
-}
+}*/
 
 void TaskReadInput( void *pvParameters ){
   // Init task variables
@@ -150,7 +153,7 @@ void TaskReadInput( void *pvParameters ){
       input = Serial.readString();
       //Serial.println(input);
 
-      xTaskCreate(TaskTransmit,  "Transmit",  128,  NULL,  2,  &xHandleTransmit );
+      //xTaskCreate(TaskTransmit,  "Transmit",  128,  NULL,  2,  &xHandleTransmit );
     }
     else{
       vTaskDelay(50);

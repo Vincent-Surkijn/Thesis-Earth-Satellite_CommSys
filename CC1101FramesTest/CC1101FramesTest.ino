@@ -16,7 +16,6 @@ short seqNr = 0;
 char TxBuffCtrl[64];
 char TxBuffStatus[255];
 char Rxbuff[255];
-bool bleep = true;
 
 // define FreeRTOS tasks
 void TaskTransmit( void *pvParameters );
@@ -25,8 +24,6 @@ void TaskBlink( void *pvParameters );
 
 TaskHandle_t xHandleTransmit;
 TaskHandle_t xHandleReceive;
-
-SemaphoreHandle_t  TxBuffMutex;
 
 void setup() {
 
@@ -48,20 +45,15 @@ void setup() {
   ELECHOUSE_cc1101.setCrc(1);     // 1 = CRC calculation in TX and CRC check in RX enabled. 0 = CRC disabled for TX and RX.
   ELECHOUSE_cc1101.setSyncWord(SYNC_WORD, SYNC_WORD); // set sync word to 1100 0000 1100 0000
 
-  TxBuffMutex = xSemaphoreCreateMutex();
-  if (TxBuffMutex == NULL) {
-    Serial.println("Mutex creation failed");
-  }
-  xSemaphoreGive(TxBuffMutex); // release mutex
   
   // Now set up tasks
-  xTaskCreate(
+/*  xTaskCreate(
     TaskTransmit
     ,  "Transmit"   // A name just for humans
     ,  128  // This stack size can be checked & adjusted by reading the Stack Highwater
     ,  NULL
     ,  2  // Priority, with 3 (configMAX_PRIORITIES - 1) being the highest, and 0 being the lowest.
-    ,  &xHandleTransmit );
+    ,  &xHandleTransmit );*/
 
     xTaskCreate(
     TaskReceive
@@ -71,7 +63,15 @@ void setup() {
     ,  3  // Priority, with 3 (configMAX_PRIORITIES - 1) being the highest, and 0 being the lowest.
     ,  &xHandleReceive );
 
-  Serial.println("Setup done");
+    xTaskCreate(
+    TaskBlink
+    ,  "Blink"   // A name just for humans
+    ,  128  // This stack size can be checked & adjusted by reading the Stack Highwater
+    ,  NULL
+    ,  2  // Priority, with 3 (configMAX_PRIORITIES - 1) being the highest, and 0 being the lowest.
+    ,  NULL );
+
+  Serial.println("CC1101FramesTest");
 }
 
 void loop() {
@@ -83,6 +83,7 @@ void loop() {
 /*
  * This task is responsible for regularly transmitting the Status frames
  */
+ /*
 void TaskTransmit(void *pvParameters)  // This is a task.
 {
   // Init task variables
@@ -112,30 +113,25 @@ void TaskTransmit(void *pvParameters)  // This is a task.
     vTaskDelay(4000 / portTICK_PERIOD_MS );
   }
 }
-
+*/
 
 void TaskReceive(void *pvParameters)  // This is a task.
 {
   // Init task variables
   (void) pvParameters;
-  
+  bool first = true;
   for(;;){  // Infinite loop
     Serial.println("RxTask");
     // While nothing is received, check every 100 ticks (100*15ms=1500ms=1.5s)
     while(!ELECHOUSE_cc1101.CheckRxFifo(100)){
-      vTaskDelay(100);
+      vTaskDelay(15);
     }
     //Checks whether something has been received.
     //When something is received we give some time (argument for function) to receive the message in full.(time in millis)
     if (ELECHOUSE_cc1101.CheckRxFifo(100)){
       if (ELECHOUSE_cc1101.CheckCRC()){    //CRC Check. If "setCrc(false)" crc returns always OK!
-        // Stop transmitting bleeps
-        vTaskSuspend(xHandleTransmit);
-        bleep = false;
-
         short len = ELECHOUSE_cc1101.ReceiveData(Rxbuff);
         Rxbuff[len] = '\0';
-        Serial.println("--END----------");
         Serial.print("Message:");
         Serial.println((char *) Rxbuff);
         byte l;
@@ -143,33 +139,26 @@ void TaskReceive(void *pvParameters)  // This is a task.
         else if (seqNr<100) l = 2;
         else  l = 3;
         char temp[l+1];
-        //Serial.print("Rxbuff:");
-        for(int i = 1; i <= l; i++){
-          //Serial.print(Rxbuff[i-1]);
-          temp[i-1] = Rxbuff[i-1];
-        }
+        for(int i = 1; i <= l; i++) temp[i-1] = Rxbuff[i-1];
         temp[l] = '\0';
         int receivedSeqNr = atoi(temp);
+        if(first){
+          seqNr = receivedSeqNr;
+          first = false;
+        }
+        Serial.print("seqNr:");
         Serial.println(receivedSeqNr);
-        if(seqNr != receivedSeqNr)  Serial.println("Error: unexpected seq nr");
-        //Serial.print("|");
+        if(receivedSeqNr != seqNr)  Serial.println("Error: unexpected seq nr");
+        seqNr++;
 
-        for(int i = 1; i<= strlen(authToken); i++)  Serial.print(Rxbuff[i+l-1]);//
-        //Serial.print("|");
-        
+        Serial.print("Authentication token:");
+        for(int i = 1; i<= strlen(authToken); i++)  Serial.print(Rxbuff[i+l-1]);
+        Serial.println();
+
+        Serial.print("Payload:");
         for(int i = 1; i<= strlen(Rxbuff)-strlen(authToken)-l; i++)  Serial.print(Rxbuff[i+l+strlen(authToken)-1]);
-        //Serial.println("|");
-        //Serial.println("----END---");
-        
-        // Increment sequence number, loop back to 0 if 255
-        if(seqNr<255){
-          seqNr++;
-        }
-        else{
-          seqNr = 0;
-        }
-        //Serial.print("seqNr:");
-        //Serial.println(seqNr);
+        Serial.println();
+
       }
       else{
         Serial.print("CRC check failed on msg ");
@@ -182,10 +171,27 @@ void TaskReceive(void *pvParameters)  // This is a task.
   } 
 }
 
+// For testing
+void TaskBlink(void *pvParameters)  // This is a task.
+{
+  (void) pvParameters;
+
+  // initialize digital LED_BUILTIN on pin 13 as an output.
+  pinMode(LED_BUILTIN, OUTPUT);
+
+  for (;;) // A Task shall never return or exit.
+  {
+    digitalWrite(LED_BUILTIN, HIGH);   // turn the LED on (HIGH is the voltage level)
+    vTaskDelay( 1000 / portTICK_PERIOD_MS ); // wait for one second
+    digitalWrite(LED_BUILTIN, LOW);    // turn the LED off by making the voltage LOW
+    vTaskDelay( 1000 / portTICK_PERIOD_MS ); // wait for one second
+  }
+}
+
 
 /******** Functions *********/
 // Control frame: |preamble|sync|length|Seq Nr|Token|Payload|CRC|
-void buildControlFrame(char *msg){
+/*void buildControlFrame(char *msg){
   String temp;
   // Clear transmit buffer
   memset(TxBuffCtrl,0,sizeof(TxBuffCtrl));
@@ -214,4 +220,4 @@ void buildStatusFrame(char* msg){
   // Clear transmit buffer
   memset(TxBuffStatus,0,sizeof(TxBuffStatus));
   
-}
+}*/
