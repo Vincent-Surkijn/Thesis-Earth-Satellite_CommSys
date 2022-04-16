@@ -2,19 +2,12 @@
 
 #define SYNC_WORD B11000000
 
-/*
- * TODO
- * Next part of data flow: exchange
- * Know when Status and when Control frame
- */
-
 //Global variables
 short seqNr = 0;
 char *authToken = "abcdefgh";
 char Rxbuff[64];
 char Txbuff[64];
-String usr = "admin";
-String pswd = "password";
+String usr_pswd = "adminpassword";
 bool conn = false;
 bool encrypted = true;
 unsigned long t1;
@@ -54,16 +47,22 @@ void loop() {
 
   // Check the RX buffer
   checkReceiver();
+
+  // To confirm Arduino is still running at all times
+  digitalWrite(LED_BUILTIN, HIGH);   // turn the LED on (HIGH is the voltage level)
+  delay(1000);                       // wait for a second
+  digitalWrite(LED_BUILTIN, LOW);    // turn the LED off by making the voltage LOW
+  delay(1000);   
 }
 
 
 /******** Functions *********/
 /*
  * This method checks the RX Fifo
- * Returns -1 if the Fifo was empty
- *         0 if a message was received and decoded correctly
+ * Returns 0 if a message was received and decoded correctly
  *         1 if a retransmit should be requested
  *         2 if the token/usr/pswd was invalid
+ *         3 if the Fifo was empty
  */
 int checkReceiver(){
   //Serial.println("Checking receiver");
@@ -96,39 +95,41 @@ int checkReceiver(){
         Serial.println(receivedSeqNr);
 
         // Check seq nr
-        if(seqNr != receivedSeqNr)  Serial.println("Error: unexpected seq nr");
-
-        // Check token if necessary
-        if(conn && encrypted){
-          if(!checkToken(l))  return 2;
+        if(seqNr != receivedSeqNr){
+          Serial.println("Error: unexpected seq nr");
+          return -1;
         }
 
-        // Read payload
-        Serial.print("Payload:");
+        // Check token if necessary & read payload      
         char payload[255];
         int i;
-        // contains token
-        if(conn && encrypted){
+        // Contains token
+        if(encrypted){
+          if(!checkToken(l))  return 2;
+          Serial.print("Payload:");
           for(i = 1; i<= strlen(Rxbuff)-strlen(authToken)-l; i++){
             payload[i-1] = Rxbuff[i+l+strlen(authToken)-1];
             Serial.print(Rxbuff[i+l+strlen(authToken)-1]);
-          }  
+          } 
         }
-        // does not contain token
+        // Does not contain token
         else{
+          Serial.print("Tokenless Payload:");
           for(i = 1; i<= strlen(Rxbuff)-l; i++){
             payload[i-1] = Rxbuff[i+l-1];
             Serial.print(Rxbuff[i+l-1]);     
           } 
         }
         Serial.println();
-        
-        // Pass payload to handler
-        payload[i-1] = '\0';
-        payloadHandler(payload);
-        
+
+        // Pass payload if connection & authentication already established
+        if(conn){
+          // Pass payload to handler
+          payload[i-1] = '\0';
+          payloadHandler(payload);
+        }        
         // Check authentication if first message
-        if(!conn){
+        else{
           // If not correct, return 2
           if(!checkAuth(l))  return 2;
           // Else send token and stop transmitting bleeps
@@ -155,7 +156,7 @@ int checkReceiver(){
       }
     }
 
-    return -1;
+    return 3;
 }
 
 /*
@@ -164,8 +165,8 @@ int checkReceiver(){
  * Returns true if successful, false if not
  */
 bool payloadHandler(char *payload){
-  Serial.print("Passed payload:");
-  Serial.println(payload);
+  //Serial.print("Passed payload:");
+  //Serial.println(payload);
   // Check payload
   if(strcmp(payload,"adminpassword")==0)  return true;
   if(strcmp(payload,"deploy panels")==0){
@@ -179,6 +180,7 @@ bool payloadHandler(char *payload){
       // Return true for success
       return true;
     }
+    else return false;
   }
   if(strcmp(payload,"unencrypted mode")==0){
     // Unencrypted messages can't enable unencrypted mode
@@ -203,7 +205,20 @@ bool payloadHandler(char *payload){
   }
   if(strcmp(payload,"battery level")==0){
     // Transmit battery level
-      String temp = buildStatusFrame("50%");
+    String temp = buildStatusFrame("50%");
+    temp.toCharArray(Txbuff,64);
+    ELECHOUSE_cc1101.SendData(Txbuff,64);
+    Serial.print("Payload handler sent ");
+    Serial.println(Txbuff);
+    
+    // Return true for success
+    return true;
+  }
+  if(strcmp(payload,"END")==0){
+    // Terminate connection
+    if(endConnection()){
+      // Transmit success message
+      String temp = buildControlFrame("END");
       temp.toCharArray(Txbuff,64);
       ELECHOUSE_cc1101.SendData(Txbuff,64);
       Serial.print("Payload handler sent ");
@@ -211,10 +226,33 @@ bool payloadHandler(char *payload){
       
       // Return true for success
       return true;
+    }
+    else  return false;
   }
   
   Serial.println("Error: unrecognised payload");
   return false;
+}
+
+/*
+ * This method terminates the connection
+ * Returns true if successful, false if not
+ */
+bool endConnection(){
+  if(encrypted){
+    // Connection ended
+    conn = false;
+    // Re-enable encryption
+    encrypted = true;
+  
+    Serial.println("Connection terminated");
+
+    return true;
+  }
+  else{
+    Serial.println("Error: unencrypted message tried to terminate connection");
+    return false;
+  }
 }
 
 /*
@@ -237,7 +275,7 @@ bool deploySolarPanels(){
  */
 void transmitToken(){
   // Build frame
-  String msg = buildControlFrame(authToken);
+  String msg = buildControlFrame("");
   msg.toCharArray(Txbuff,64);
   // Send data
   ELECHOUSE_cc1101.SendData(Txbuff,64);
@@ -252,16 +290,17 @@ void transmitToken(){
  */
 bool checkAuth(byte l){
     Serial.print("Auth:");
-    char auth[strlen(Rxbuff)-l];
-    for(int i = 1; i<= strlen(Rxbuff)-l; i++){
-      auth[i-1] = Rxbuff[i+l-1];
-      Serial.print(Rxbuff[i+l-1]);
+    char auth[strlen(Rxbuff)-strlen(authToken)-l];
+    for(int i = 1; i<= strlen(Rxbuff)-strlen(authToken)-l; i++){
+      auth[i-1] = Rxbuff[i+l+strlen(authToken)-1];
+      Serial.print(Rxbuff[i+l+strlen(authToken)-1]);
     }
-    auth[strlen(Rxbuff)-l]='\0';
+    auth[strlen(Rxbuff)-strlen(authToken)-l]='\0';
     Serial.println();
-    usr.concat(pswd);
+    
     char temp[50];
-    usr.toCharArray(temp,50);
+    usr_pswd.toCharArray(temp,50);
+    //Serial.print("Temp:");
     //Serial.println(temp);
     if(strcmp(auth,temp)!=0){
       Serial.println("Error: invalid authentication");
@@ -285,6 +324,14 @@ bool checkToken(byte l){
     }
     token[8] = '\0';
     Serial.println();
+    // If first message, token is all zeros
+    if(!conn){
+      if(strcmp(token,"00000000")!=0){
+        Serial.println("Error: invalid token");
+        return false;
+      }
+      else return true;
+    }
     if(strcmp(token,authToken)!=0){
       Serial.println("Error: invalid token");
       return false;
@@ -298,13 +345,13 @@ bool checkToken(byte l){
  */
 void sendBleep(){
   // Build frame
-  char bleep[300]; 
+  char bleep[20]; 
   // Set sequence number to -1 because it is incremented in buildStatusFrame()
   seqNr = -1;
-  (buildStatusFrame("Status update")).toCharArray(bleep,300);
+  (buildStatusFrame("Status update")).toCharArray(bleep,20);
 
   // Send data
-  ELECHOUSE_cc1101.SendData(bleep,255);
+  ELECHOUSE_cc1101.SendData(bleep,20);
 
   // Error check
   Serial.print("Bleep:");
@@ -315,7 +362,6 @@ void sendBleep(){
 // Control frame: |preamble|sync|length|Seq Nr|Token|Payload|CRC|
 String buildControlFrame(char *msg){
   String temp;
-  char TxBuffCtrl[64];
 
   // Error check
   if(!encrypted)  Serial.println("Error: unencrypted Control frame");
@@ -342,7 +388,6 @@ String buildControlFrame(char *msg){
 // Status frame: |preamble|sync|length|Seq Nr|Payload|CRC|
 String buildStatusFrame(char* msg){  
   String temp;
-  char TxBuffStatus[255];
 
   // Status frames should never be encrypted
   encrypted = false;

@@ -55,7 +55,7 @@ void setup() {
     ,  2  // Priority, with 3 (configMAX_PRIORITIES - 1) being the highest, and 0 being the lowest.
     ,  &xHandleTransmit );
 
-/*    xTaskCreate(
+    xTaskCreate(
     TaskReceive
     ,  "Receive"   // A name just for humans
     ,  128  // This stack size can be checked & adjusted by reading the Stack Highwater
@@ -63,7 +63,7 @@ void setup() {
     ,  2  // Priority, with 3 (configMAX_PRIORITIES - 1) being the highest, and 0 being the lowest.
     ,  &xHandleReceive );
 
-    xTaskCreate(
+/*    xTaskCreate(
     TaskReadInput
     ,  "Receive"   // A name just for humans
     ,  128  // This stack size can be checked & adjusted by reading the Stack Highwater
@@ -92,7 +92,7 @@ void TaskTransmit(void *pvParameters)  // This is a task.
     Serial.println("TxTask");
 
     // Concatenate counter and message in String datatype (because it has .concat method)
-    String buff = String(seqNr);
+    /*String buff = String(seqNr);
     buff.concat(authToken);
     buff.concat("Hello world");
     
@@ -103,17 +103,18 @@ void TaskTransmit(void *pvParameters)  // This is a task.
     //Serial.println(c);
     // Send data
     ELECHOUSE_cc1101.SendData(c,50);
-    seqNr++;
+    seqNr++;*/
+    ELECHOUSE_cc1101.SendData("Hello world",50);
 
-    Serial.println(buff);
+    //Serial.println(buff);
     Serial.println("Message sent");
 
-    vTaskDelay(150);
+    vTaskDelay(200);
   }
 }
 
 
-/*void TaskReceive(void *pvParameters)  // This is a task.
+void TaskReceive(void *pvParameters)  // This is a task.
 {
   // Init task variables
   (void) pvParameters;
@@ -121,11 +122,10 @@ void TaskTransmit(void *pvParameters)  // This is a task.
   for(;;){  // Infinite loop
     Serial.println("RxTask");
     // While nothing is received, check every 100 ticks (100*15ms=1500ms=1.5s)
-    while(!ELECHOUSE_cc1101.CheckRxFifo(100)){
+    /*while(!ELECHOUSE_cc1101.CheckRxFifo(100)){
       Serial.println("Checking");
-ELECHOUSE_cc1101.SendData("Hello there",255);
-      vTaskDelay(100);
-    }
+      vTaskDelay(10);
+    }**/
     //Checks whether something has been received.
     //When something is received we give some time (argument for function) to receive the message in full.(time in millis)
     if (ELECHOUSE_cc1101.CheckRxFifo(100)){
@@ -142,8 +142,8 @@ ELECHOUSE_cc1101.SendData("Hello there",255);
       }
     }
   } 
-}*/
-
+}
+/*
 void TaskReadInput( void *pvParameters ){
   // Init task variables
   (void) pvParameters;
@@ -159,7 +159,7 @@ void TaskReadInput( void *pvParameters ){
       vTaskDelay(50);
     }
   }
-}
+}*/
 
 /******** Functions *********/
 /*// Control frame: |preamble|sync|length|Seq Nr|Token|Payload|CRC|
